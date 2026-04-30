@@ -96,6 +96,17 @@ uv run python -m stackchan_mcp
 
 詳細は `gateway/README.md` 参照。
 
+## アバター画像について
+
+`firmware/main/boards/stackchan/avatar_images.cc` は **真っ黒 RGB565 のプレースホルダ** です。ビルドは通りますが、画面には何も表示されません。実際にアバターを表示するには、自分の PNG 画像 (160×120) から `avatar_images.cc` を再生成してください。
+
+シンボル一覧 (`avatar_images.h` 参照):
+- 表情系 (6): `avatar_idle`, `avatar_happy`, `avatar_thinking`, `avatar_sad`, `avatar_surprised`, `avatar_embarrassed`
+- 目 (3): `avatar_eyes_open`, `avatar_eyes_half`, `avatar_eyes_closed`
+- 口 (5): `avatar_mouth_closed`, `avatar_mouth_half`, `avatar_mouth_open`, `avatar_mouth_e`, `avatar_mouth_u`
+
+PNG → RGB565 配列の変換スクリプトは LVGL 公式の [Online Image Converter](https://lvgl.io/tools/imageconverter) などが使えます。
+
 ## 既知の課題
 
 - 大角度急逆転 (±60° → -60° 等) でサーボハングする場合あり (Motion::update_task の補間移植で改善予定)
