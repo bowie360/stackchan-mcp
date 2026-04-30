@@ -11,7 +11,7 @@
                                    └──────────────┘
 ```
 
-任意の MCP クライアント (Claude Code / Claude Desktop / 他) から、首振り・LED・カメラ撮影・タッチセンサ・アバター表情切替などの StackChan 操作を呼び出せる。
+任意の MCP クライアント (Claude Code / Claude Desktop / 他) から、首振り・カメラ撮影・タッチセンサ・アバター表情切替などの StackChan 操作を呼び出せる。
 
 ## 構成
 

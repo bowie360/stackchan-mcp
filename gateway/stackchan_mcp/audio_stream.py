@@ -1,4 +1,4 @@
-"""Opus audio frame handling — skeleton for Phase 3.
+"""Opus audio frame handling — skeleton for Phase 4 (planned).
 
 This module will handle:
 - Incoming Opus frames from the device (STT pipeline)
@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 async def handle_audio_frame(data: bytes, session_id: str) -> None:
     """Process an incoming binary Opus frame (stub).
 
-    Phase 3 will pipe this into an STT engine.
+    Phase 4 will pipe this into an STT engine.
     """
     logger.debug(
-        "audio_frame session=%s bytes=%d (discarded — Phase 3)",
+        "audio_frame session=%s bytes=%d (discarded — Phase 4)",
         session_id,
         len(data),
     )
@@ -29,6 +29,6 @@ async def handle_audio_frame(data: bytes, session_id: str) -> None:
 async def send_audio_frame(data: bytes) -> bytes:
     """Prepare an outgoing Opus frame (stub).
 
-    Phase 3 will generate this from a TTS engine.
+    Phase 4 will generate this from a TTS engine.
     """
     return data

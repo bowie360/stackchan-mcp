@@ -147,6 +147,6 @@ asyncio.run(smoke())
 ## Phase roadmap
 
 - **Phase 1** (done): stdio MCP shell, ESP32 WebSocket bridge, tool routing
-- **Phase 2** (done): real servo / LED / volume / brightness via ESP32
+- **Phase 2** (done): real servo / volume / brightness via ESP32
 - **Phase 3** (done): camera capture (JPEG over HTTP)
 - **Phase 4** (planned): Opus audio stream (STT/TTS pipeline)
