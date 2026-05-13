@@ -277,6 +277,15 @@ connection attempt.
 For non-LAN setups, see [`docs/remote-access.md`](docs/remote-access.md) for the
 Tailscale Funnel flow and the `VISION_URL` capture callback setting.
 
+#### Motion template editor
+
+While the gateway is running, open
+`http://<gateway-host>:8766/editor` to use the bundled timeline editor for
+drafting named motion templates. The editor runs entirely in the browser and
+exports a JSON file with `avatar`, `leds`, and `servo` tracks using the draft
+`stackchan.motion_template.v0` schema. Direct push to the device is intentionally
+left for the future `register_motion(name, json)` runtime path tracked in #89.
+
 ### 3. Register as an MCP client (Claude Code example)
 
 Add to `~/.claude.json`.

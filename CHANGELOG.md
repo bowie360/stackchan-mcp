@@ -15,6 +15,14 @@ change is called out under a `Firmware` subsection of the release entry.
 
 ## [Unreleased]
 
+### Added
+
+- Bundled a static motion template timeline editor at `/editor` on the
+  gateway HTTP utility port. The editor previews `avatar`, `leds`, and
+  `servo` tracks in the browser and exports draft
+  `stackchan.motion_template.v0` JSON for the future `register_motion`
+  runtime path. Refs #90 and #89.
+
 ## [0.6.0] - 2026-05-12
 
 ### Added

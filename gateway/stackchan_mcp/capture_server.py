@@ -10,6 +10,7 @@ can view the image via the Read tool.
 
 from __future__ import annotations
 
+from importlib import resources
 import json
 import logging
 import os
@@ -21,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 CAPTURE_DIR = os.path.expanduser("~/.stackchan/captures")
 CAPTURE_TOKEN_KEY = web.AppKey("capture_token", str)
+EDITOR_ASSET_TYPES = {
+    "index.html": "text/html",
+    "styles.css": "text/css",
+    "app.js": "application/javascript",
+}
 
 
 def _is_authorized(auth_header: str, expected_token: str) -> bool:
@@ -83,9 +89,43 @@ async def handle_capture(request: web.Request) -> web.Response:
     )
 
 
+def _read_editor_asset(filename: str) -> tuple[bytes, str]:
+    """Read a bundled motion editor asset and return bytes + content type."""
+    content_type = EDITOR_ASSET_TYPES.get(filename)
+    if content_type is None:
+        raise web.HTTPNotFound(text="Editor asset not found")
+
+    try:
+        data = (
+            resources.files("stackchan_mcp")
+            .joinpath("editor", filename)
+            .read_bytes()
+        )
+    except FileNotFoundError as exc:
+        raise web.HTTPNotFound(text="Editor asset not found") from exc
+
+    return data, content_type
+
+
+async def handle_editor_index(request: web.Request) -> web.Response:
+    """Serve the motion template timeline editor."""
+    data, content_type = _read_editor_asset("index.html")
+    return web.Response(body=data, content_type=content_type)
+
+
+async def handle_editor_asset(request: web.Request) -> web.Response:
+    """Serve a whitelisted motion editor asset."""
+    filename = request.match_info["filename"]
+    data, content_type = _read_editor_asset(filename)
+    return web.Response(body=data, content_type=content_type)
+
+
 def create_capture_app(capture_token: str = "") -> web.Application:
-    """Create the HTTP capture application."""
+    """Create the HTTP capture and local tooling application."""
     app = web.Application()
     app[CAPTURE_TOKEN_KEY] = capture_token
     app.router.add_post("/capture", handle_capture)
+    app.router.add_get("/editor", handle_editor_index)
+    app.router.add_get("/editor/", handle_editor_index)
+    app.router.add_get("/editor/{filename}", handle_editor_asset)
     return app

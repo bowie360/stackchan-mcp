@@ -97,7 +97,7 @@ class Gateway:
 
         self._running = True
         logger.info(
-            "Gateway started: WS on %s:%d, capture on %s:%d, vision_url=%s",
+            "Gateway started: WS on %s:%d, HTTP tools on %s:%d, vision_url=%s",
             host, ws_port, host, capture_port, self.vision_url,
         )
 

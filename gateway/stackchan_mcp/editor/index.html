@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>StackChan Motion Timeline Editor</title>
+    <link rel="stylesheet" href="/editor/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">stackchan-mcp</p>
+          <h1>Motion Timeline Editor</h1>
+        </div>
+        <div class="project-fields" aria-label="Template settings">
+          <label>
+            <span>Name</span>
+            <input id="template-name" type="text" value="happy_custom" autocomplete="off">
+          </label>
+          <label>
+            <span>Duration ms</span>
+            <input id="duration-ms" type="number" min="100" max="30000" step="100" value="1200">
+          </label>
+        </div>
+      </header>
+
+      <section class="workspace" aria-label="Timeline editor">
+        <section class="timeline-panel" aria-label="Timeline tracks">
+          <div class="transport">
+            <button id="play-toggle" type="button">Play</button>
+            <button id="stop-playback" type="button">Stop</button>
+            <button id="delete-selected" type="button" disabled>Delete Selected</button>
+            <label class="scrubber-label" for="scrubber">
+              <span id="current-time-label">0 ms</span>
+              <input id="scrubber" type="range" min="0" max="1200" step="10" value="0">
+            </label>
+          </div>
+
+          <div class="timeline" id="timeline">
+            <div class="time-axis" id="time-axis" aria-hidden="true"></div>
+            <div class="track-row" data-track="avatar">
+              <div class="track-label">Avatar</div>
+              <div class="track-lane" id="avatar-lane"></div>
+            </div>
+            <div class="track-row" data-track="leds">
+              <div class="track-label">LEDs</div>
+              <div class="track-lane" id="leds-lane"></div>
+            </div>
+            <div class="track-row" data-track="servo">
+              <div class="track-label">Servo</div>
+              <div class="track-lane" id="servo-lane"></div>
+            </div>
+            <div class="playhead" id="playhead" aria-hidden="true"></div>
+          </div>
+        </section>
+
+        <aside class="preview-panel" aria-label="Preview">
+          <section class="preview-card avatar-preview">
+            <h2>Avatar</h2>
+            <div class="avatar-face" id="avatar-face" data-face="idle">
+              <span class="eye left-eye"></span>
+              <span class="eye right-eye"></span>
+              <span class="mouth"></span>
+            </div>
+            <output id="avatar-label">idle</output>
+          </section>
+
+          <section class="preview-card">
+            <h2>LEDs</h2>
+            <div class="led-strip" id="led-strip" aria-label="LED preview"></div>
+          </section>
+
+          <section class="preview-card">
+            <h2>Servo</h2>
+            <div class="servo-field" aria-label="Servo head angle preview">
+              <div class="servo-crosshair"></div>
+              <div class="servo-head" id="servo-head"></div>
+            </div>
+            <output id="servo-label">yaw 0, pitch 10</output>
+          </section>
+        </aside>
+      </section>
+
+      <section class="editors" aria-label="Track editors">
+        <form class="editor-card" id="avatar-form">
+          <h2>Avatar Keyframe</h2>
+          <label>
+            <span>Time ms</span>
+            <input name="time_ms" type="number" min="0" step="10" value="0">
+          </label>
+          <label>
+            <span>Face</span>
+            <select name="face">
+              <option value="idle">idle</option>
+              <option value="happy" selected>happy</option>
+              <option value="thinking">thinking</option>
+              <option value="sad">sad</option>
+              <option value="surprised">surprised</option>
+              <option value="embarrassed">embarrassed</option>
+              <option value="off">off</option>
+            </select>
+          </label>
+          <button type="submit">Add Avatar</button>
+        </form>
+
+        <form class="editor-card led-editor" id="led-form">
+          <h2>LED Frame</h2>
+          <label>
+            <span>Time ms</span>
+            <input name="time_ms" type="number" min="0" step="10" value="0">
+          </label>
+          <div class="led-paint-row">
+            <label>
+              <span>Paint color</span>
+              <input id="paint-color" type="color" value="#ffb000">
+            </label>
+            <label>
+              <span>LED</span>
+              <select id="paint-target">
+                <option value="all">all</option>
+                <option value="0">0</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+                <option value="11">11</option>
+              </select>
+            </label>
+          </div>
+          <div class="draft-led-strip" id="draft-led-strip" aria-label="Editable LED frame"></div>
+          <div class="button-row">
+            <button type="button" id="paint-apply">Paint</button>
+            <button type="button" id="paint-clear">Clear</button>
+          </div>
+          <button type="submit">Add LED Frame</button>
+        </form>
+
+        <form class="editor-card" id="servo-form">
+          <h2>Servo Keyframe</h2>
+          <label>
+            <span>Time ms</span>
+            <input name="time_ms" type="number" min="0" step="10" value="0">
+          </label>
+          <label>
+            <span>Yaw deg</span>
+            <input name="yaw" type="number" min="-90" max="90" step="1" value="0">
+          </label>
+          <label>
+            <span>Pitch deg</span>
+            <input name="pitch" type="number" min="0" max="88" step="1" value="10">
+          </label>
+          <label>
+            <span>Move duration ms</span>
+            <input name="duration_ms" type="number" min="10" max="10000" step="10" value="240">
+          </label>
+          <button type="submit">Add Servo</button>
+        </form>
+      </section>
+
+      <section class="json-panel" aria-label="Template JSON">
+        <div class="json-actions">
+          <h2>Template JSON</h2>
+          <div class="button-row">
+            <button id="copy-json" type="button">Copy JSON</button>
+            <button id="download-json" type="button">Export JSON</button>
+            <label class="file-button">
+              Import JSON
+              <input id="import-json" type="file" accept="application/json,.json">
+            </label>
+          </div>
+        </div>
+        <textarea id="json-output" spellcheck="false"></textarea>
+        <p class="status-line" id="status-line" role="status">Draft schema: stackchan.motion_template.v0</p>
+      </section>
+    </main>
+
+    <template id="chip-template">
+      <button class="event-chip" type="button"></button>
+    </template>
+
+    <script src="/editor/app.js"></script>
+  </body>
+</html>

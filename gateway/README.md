@@ -174,6 +174,19 @@ instead of cascading errors.
 The mapping from these names to ESP32-side `self.*` MCP tools is in
 `stackchan_mcp/stdio_server.py`.
 
+## Motion template editor
+
+The gateway also serves a bundled static editor at
+`http://<gateway-host>:8766/editor` on the HTTP utility port. It lets
+contributors draft named motion templates on a scrubable timeline with
+parallel `avatar`, `leds`, and `servo` tracks, preview the composed state in
+the browser, and export a JSON file using the draft
+`stackchan.motion_template.v0` schema.
+
+The current editor is export-only. Pushing templates to the connected device is
+reserved for the future `register_motion(name, json)` runtime path tracked in
+Issue #89.
+
 ## Architecture
 
 ```
@@ -182,7 +195,8 @@ stackchan_mcp/
 ├── gateway.py          # singleton orchestrator
 ├── stdio_server.py     # MCP client side (stdio MCP server)
 ├── esp32_client.py     # ESP32 side (WebSocket MCP client + auth)
-├── capture_server.py   # HTTP /capture endpoint for photo uploads
+├── capture_server.py   # HTTP /capture endpoint and /editor tooling routes
+├── editor/             # bundled static motion template editor
 ├── server.py           # legacy local WS test server (unused in prod)
 ├── mcp_router.py       # legacy local stub router (unused in prod)
 ├── protocol.py         # JSON-RPC 2.0 message helpers
