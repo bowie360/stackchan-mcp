@@ -94,6 +94,14 @@ void AfeWakeWord::OnWakeWordDetected(std::function<void(const std::string& wake_
 }
 
 void AfeWakeWord::Start() {
+    // [patch: start-reset-buffer] 每次 Start 重置 AFE buffer，防止 Stop 被
+    // 跳过导致 buffer 残留使唤醒词检测卡死。reset_buffer 幂等，与 Stop() 同模式。
+    // 详见 docs/wake-word-firmware-fix.md 方案 2D。
+    std::lock_guard<std::mutex> lock(input_buffer_mutex_);
+    if (afe_data_ != nullptr) {
+        afe_iface_->reset_buffer(afe_data_);
+    }
+    input_buffer_.clear();
     xEventGroupSetBits(event_group_, DETECTION_RUNNING_EVENT);
 }
 
