@@ -23,6 +23,11 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 
 CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=y
 
+# [patch: wake-word-in-listening] AFE 在 Idle/Listening/Speaking 三态常 ON，
+# 永不 Stop，根治唤醒词一次性（Listening->Idle 的 AFE Stop->Start 恢复不可靠）。
+# 详见 docs/wake-word-firmware-fix.md 方案 2A。
+CONFIG_WAKE_WORD_DETECTION_IN_LISTENING=y
+
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 
 CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=1536
