@@ -318,7 +318,7 @@ class ESP32Connection:
             raise ConnectionError("ESP32 not connected")
         await self._ws_send(opus_frame)
 
-    async def send_tts_state(self, state: str) -> None:
+    async def send_tts_state(self, state: str, text: str | None = None) -> None:
         """Send a TTS state notification (``start`` / ``stop`` / ...).
 
         The device's :func:`Application::OnIncomingJson` translates
@@ -337,6 +337,8 @@ class ESP32Connection:
             "type": "tts",
             "state": state,
         }
+        if text is not None and state == "sentence_start":
+            message["text"] = text
         await self._ws_send(json.dumps(message))
 
     async def send_listen_state(self, state: str, mode: str = "manual") -> None:
@@ -1007,7 +1009,7 @@ class ESP32Manager:
             raise ConnectionError("No ESP32 device connected")
         await self._connection.send_audio_frame(opus_frame)
 
-    async def send_tts_state(self, state: str) -> None:
+    async def send_tts_state(self, state: str, text: str | None = None) -> None:
         """Send a TTS state notification (``start`` / ``stop`` / ...).
 
         Required around audio frame egress so the device transitions
@@ -1016,7 +1018,7 @@ class ESP32Manager:
         """
         if not self._connection or not self._connection.connected:
             raise ConnectionError("No ESP32 device connected")
-        await self._connection.send_tts_state(state)
+        await self._connection.send_tts_state(state, text)
 
     async def send_listen_state(self, state: str, mode: str = "manual") -> None:
         """Send a listen state notification to put the device into /

@@ -56,6 +56,7 @@ static inline bool ServoWritePosOk(int r) { return r > 0; }
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -501,6 +502,83 @@ private:
     }
 };
 
+// SPI LCD display subclass for StackChan: routes "assistant" chat messages
+// (TTS subtitles and photo descriptions) to a board-owned overlay label that
+// sits above the full-screen avatar, so the text is never obscured by the
+// avatar expression. Other roles ("system"/"user") fall through to the base
+// LcdDisplay chat UI. The board wires show/hide callbacks after construction;
+// the overlay label itself is board-owned (like avatar_img_), so z-order
+// against the avatar is coordinated by the board's RaiseOverlays helper.
+class StackchanLcdDisplay : public SpiLcdDisplay {
+public:
+    using SpiLcdDisplay::SpiLcdDisplay;
+
+    // The firmware's original subtitle is bottom_bar_ + chat_message_label_
+    // (1-line LV_LABEL_LONG_SCROLL_CIRCULAR, scrolls horizontally). SetChatMessage
+    // populates it, but the board's avatar_img_ is moved to foreground on every
+    // face change and covers bottom_bar_. Re-raise bottom_bar_ above the avatar
+    // whenever a message is set so the subtitle stays visible.
+    void SetChatMessage(const char* role, const char* content) override {
+        LcdDisplay::SetChatMessage(role, content);
+        DisplayLockGuard lock(this);
+        // Apply the white-on-black restyle here (idempotent) rather than in
+        // SetupUI: SetupUI is invoked during display construction before this
+        // subclass's vtable is active, so the SetupUI override is bypassed and
+        // the bar keeps the theme's dark-text/gray-bg defaults (invisible on a
+        // dark avatar). SetChatMessage is called later via virtual dispatch
+        // (which works) every time a subtitle shows.
+        RestyleSubtitleBarLocked();
+        RaiseSubtitleBarToFrontIfVisible();
+    }
+
+    // Restyle the original subtitle bar so it is legible over the avatar:
+    // white text on a solid black background. The theme default is dark text on
+    // a semi-transparent theme background, which vanishes on a dark avatar
+    // expression. Caller holds the lock; applied from SetChatMessage (idempotent).
+    void RestyleSubtitleBarLocked() {
+        if (bottom_bar_ != nullptr) {
+            lv_obj_set_style_bg_color(bottom_bar_, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(bottom_bar_, 0, 0);
+        }
+        if (chat_message_label_ != nullptr) {
+            lv_obj_set_style_text_color(chat_message_label_, lv_color_white(), 0);
+        }
+    }
+
+    // Raise bottom_bar_ (subtitle) above the avatar. Caller holds the lock.
+    void RaiseSubtitleBarToFrontIfVisible() {
+        if (bottom_bar_ != nullptr && lv_obj_is_valid(bottom_bar_) &&
+            !lv_obj_has_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_move_foreground(bottom_bar_);
+        }
+    }
+
+    // Raise the photo preview (preview_image_) above the avatar so a captured
+    // photo is not obscured by the avatar expression. Called by the board
+    // after every avatar move_foreground (blink / face change) so the preview
+    // stays on top throughout its 5s display window. Caller holds the lock.
+    void RaisePreviewToFrontIfVisible() {
+        if (preview_image_ != nullptr && lv_obj_is_valid(preview_image_) &&
+            !lv_obj_has_flag(preview_image_, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_move_foreground(preview_image_);
+        }
+    }
+
+    // The firmware already displays the captured photo via preview_image_
+    // (camera capture -> SetPreviewImage). The board's avatar_img_ is moved to
+    // foreground on every face change, which covers preview_image_. Re-raise
+    // the preview above the avatar when a photo is shown so it stays visible.
+    void SetPreviewImage(std::unique_ptr<LvglImage> image) override {
+        bool showing = image != nullptr;
+        LcdDisplay::SetPreviewImage(std::move(image));
+        if (showing) {
+            DisplayLockGuard lock(this);
+            RaisePreviewToFrontIfVisible();
+        }
+    }
+};
+
 class StackChanBoard : public WifiBoard {
 private:
     // Internal I2C bus (shared by AXP2101 / AW9523 / FT6336 / PY32 / Si12T /
@@ -543,6 +621,7 @@ private:
     lv_obj_t* listening_indicator_ = nullptr;
     lv_obj_t* listening_indicator_dot_ = nullptr;
     std::atomic<bool> listening_indicator_visible_{false};
+
     static constexpr int LISTENING_INDICATOR_DOT_SIZE_PX = 14;
 
     // Dynamic avatar set loaded via the load_avatar_set MCP tool. Stays
@@ -2351,6 +2430,16 @@ private:
     }
 
     void BringListeningIndicatorToFrontLocked() {
+        // Re-raise the subtitle bar (bottom_bar_) and photo preview above the
+        // freshly-raised avatar: every avatar move_foreground site calls this
+        // helper, so doing it here keeps them visible after each face/frame
+        // change (blink, expression switch).
+        if (display_ != nullptr) {
+            auto* sc = static_cast<StackchanLcdDisplay*>(display_);
+            sc->RaiseSubtitleBarToFrontIfVisible();
+            sc->RaisePreviewToFrontIfVisible();
+        }
+
         if (listening_indicator_ == nullptr) {
             return;
         }
@@ -2581,8 +2670,13 @@ private:
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
 
-        display_ = new SpiLcdDisplay(panel_io, panel,
+        auto* sc_display = new StackchanLcdDisplay(panel_io, panel,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        // The subtitle bar (bottom_bar_) is restyled white-on-black and raised
+        // above the avatar in StackchanLcdDisplay::SetupUI / SetChatMessage /
+        // BringListeningIndicatorToFrontLocked. SetupUI runs later (from
+        // Application::Start), so bottom_bar_ is not ready to restyle here.
+        display_ = sc_display;
     }
 
      void InitializeCamera() {
@@ -4432,6 +4526,13 @@ private:
         // chat bubbles, etc. The status bar (clock/battery) lives on a
         // separate sibling and is moved to foreground later if needed.
         lv_obj_move_foreground(avatar_img_);
+        // Re-raise the subtitle bar / photo preview so a freshly created
+        // avatar does not end up above them.
+        if (display_ != nullptr) {
+            auto* sc = static_cast<StackchanLcdDisplay*>(display_);
+            sc->RaiseSubtitleBarToFrontIfVisible();
+            sc->RaisePreviewToFrontIfVisible();
+        }
         ESP_LOGI(TAG, "Avatar lv_image created on active screen");
         return true;
     }

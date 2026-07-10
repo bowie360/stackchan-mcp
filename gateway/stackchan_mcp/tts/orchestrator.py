@@ -373,6 +373,7 @@ async def synthesize_and_send(
             if should_redispatch_face_after_speech
             else None
         ),
+        subtitle_text=tts_text,
     )
 
     logger.info(
@@ -412,6 +413,7 @@ async def send_pcm_audio(
     source_label: str = "external",
     before_first_frame: Callable[[], Awaitable[None]] | None = None,
     after_playback_complete: Callable[[], Awaitable[None]] | None = None,
+    subtitle_text: str | None = None,
 ) -> dict[str, Any]:
     """Encode mono PCM and push as Opus frames to the connected device.
 
@@ -535,6 +537,19 @@ async def send_pcm_audio(
             raise RuntimeError(
                 f"Device disconnected before TTS start notification: {exc}"
             ) from exc
+
+        # Send the spoken text as a subtitle (assistant chat message). The
+        # device renders it on the overlay above the avatar via
+        # Display::SetChatMessage, so the user sees what is being said
+        # without the avatar expression obscuring it. Best-effort: a
+        # failure here must not abort the audio push.
+        if subtitle_text:
+            try:
+                await gateway.esp32.send_tts_state(
+                    "sentence_start", text=subtitle_text
+                )
+            except ConnectionError:
+                pass
 
         # Wait for the firmware's state machine to land in
         # kDeviceStateSpeaking before sending the first frame.
