@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 # Timeout for waiting for ESP32 responses
 RESPONSE_TIMEOUT = 10.0
+WEBSOCKET_PING_INTERVAL_S = 20
+WEBSOCKET_PING_TIMEOUT_S = 20
 
 ToolCall = tuple[str, dict[str, Any]]
 ToolCallResult = tuple[Any, dict[str, Any] | None]
@@ -49,6 +51,8 @@ _TOOL_LANES = {
     "self.robot.": "servo",
     "self.wifi.": "wifi",
     "self.led.": "led",
+    "self.port_b.": "port_b",
+    "self.port_c.": "port_c",
     "self.display.": "avatar",
     "self.screen.": "display",
     "self.audio_speaker.": "audio",
@@ -70,6 +74,52 @@ def _retrieve_future_exception(future: asyncio.Future[Any]) -> None:
     """Mark a completed Future exception as observed, if it has one."""
     if future.done() and not future.cancelled():
         future.exception()
+
+
+def _close_frame_fields(close_frame: Any | None) -> tuple[int | None, str | None]:
+    """Return log-friendly code/reason fields for a WebSocket close frame."""
+    if close_frame is None:
+        return None, None
+    return getattr(close_frame, "code", None), getattr(close_frame, "reason", None)
+
+
+def _format_elapsed_s(started_at: float | None, now: float) -> str:
+    """Format elapsed monotonic seconds for stable, compact log output."""
+    if started_at is None:
+        return "None"
+    return f"{now - started_at:.3f}"
+
+
+def _monotonic() -> float:
+    """Return monotonic time for connection observability."""
+    return time.monotonic()
+
+
+def _log_disconnect_details(
+    *,
+    device_id: str,
+    close_class: str,
+    rcvd_code: int | None,
+    rcvd_reason: str | None,
+    sent_code: int | None,
+    sent_reason: str | None,
+    connected_at: float,
+    last_frame_received_at: float | None,
+) -> None:
+    disconnected_at = _monotonic()
+    logger.info(
+        "ESP32 disconnected: device=%s close_class=%s "
+        "rcvd_code=%s rcvd_reason=%r sent_code=%s sent_reason=%r "
+        "last_frame_age_s=%s lifetime_s=%s",
+        device_id,
+        close_class,
+        rcvd_code,
+        rcvd_reason,
+        sent_code,
+        sent_reason,
+        _format_elapsed_s(last_frame_received_at, disconnected_at),
+        _format_elapsed_s(connected_at, disconnected_at),
+    )
 
 
 class ESP32Connection:
@@ -341,7 +391,12 @@ class ESP32Connection:
             message["text"] = text
         await self._ws_send(json.dumps(message))
 
-    async def send_listen_state(self, state: str, mode: str = "manual") -> None:
+    async def send_listen_state(
+        self,
+        state: str,
+        mode: str = "manual",
+        profile: str = "voice",
+    ) -> None:
         """Send a listen state notification (``start`` / ``stop``).
 
         Server-driven counterpart to the device's existing
@@ -356,6 +411,12 @@ class ESP32Connection:
         :func:`HandleStartListeningEvent` unconditionally enters
         ``kListeningModeManualStop`` (the gateway controls the stop
         boundary explicitly).
+
+        ``profile`` selects the firmware microphone capture source for
+        ``state="start"``. The default ``"voice"`` profile is omitted
+        from the JSON to keep the wire shape compatible with older logs
+        and firmware. Beat mode uses ``"raw"`` to bypass the device-side
+        speech AFE path.
         """
         if not self._connected:
             raise ConnectionError("ESP32 not connected")
@@ -366,6 +427,8 @@ class ESP32Connection:
         }
         if state == "start":
             message["mode"] = mode
+            if profile != "voice":
+                message["profile"] = profile
         await self._ws_send(json.dumps(message))
 
     def disconnect(self) -> None:
@@ -447,6 +510,8 @@ class ESP32Manager:
             "servo": asyncio.Lock(),
             "wifi": asyncio.Lock(),
             "led": asyncio.Lock(),
+            "port_b": asyncio.Lock(),
+            "port_c": asyncio.Lock(),
             "avatar": asyncio.Lock(),
             "display": asyncio.Lock(),
             "audio": asyncio.Lock(),
@@ -507,12 +572,21 @@ class ESP32Manager:
                 "Device-driven listen capture enabled (audio hook %s)",
                 audio_hook_url,
             )
-        logger.info("ESP32 WebSocket server starting on ws://%s:%d", host, port)
+        logger.info(
+            "ESP32 WebSocket server starting on ws://%s:%d "
+            "ping_interval=%s ping_timeout=%s",
+            host,
+            port,
+            WEBSOCKET_PING_INTERVAL_S,
+            WEBSOCKET_PING_TIMEOUT_S,
+        )
         self._server = await websockets.serve(
             self._handler,
             host,
             port,
             process_request=self._check_auth,
+            ping_interval=WEBSOCKET_PING_INTERVAL_S,
+            ping_timeout=WEBSOCKET_PING_TIMEOUT_S,
         )
 
     async def stop(self) -> None:
@@ -563,9 +637,13 @@ class ESP32Manager:
 
         connection = ESP32Connection(ws, session_id)
         connection.device_id = device_id
+        connected_at = _monotonic()
+        last_frame_received_at: float | None = None
+        disconnect_logged = False
 
         try:
             async for message in ws:
+                last_frame_received_at = _monotonic()
                 if isinstance(message, bytes):
                     # Binary = audio frame. Forward to the audio_stream
                     # module which buffers it for STT capture (Issue
@@ -717,8 +795,33 @@ class ESP32Manager:
                 else:
                     logger.debug("ESP32 message type=%s (ignored)", msg_type)
 
-        except websockets.exceptions.ConnectionClosed:
-            logger.info("ESP32 disconnected: device=%s", device_id)
+            if not disconnect_logged:
+                _log_disconnect_details(
+                    device_id=device_id,
+                    close_class="GracefulClose",
+                    rcvd_code=getattr(ws, "close_code", None),
+                    rcvd_reason=getattr(ws, "close_reason", None),
+                    sent_code=None,
+                    sent_reason=None,
+                    connected_at=connected_at,
+                    last_frame_received_at=last_frame_received_at,
+                )
+                disconnect_logged = True
+
+        except websockets.exceptions.ConnectionClosed as exc:
+            rcvd_code, rcvd_reason = _close_frame_fields(exc.rcvd)
+            sent_code, sent_reason = _close_frame_fields(exc.sent)
+            _log_disconnect_details(
+                device_id=device_id,
+                close_class=exc.__class__.__name__,
+                rcvd_code=rcvd_code,
+                rcvd_reason=rcvd_reason,
+                sent_code=sent_code,
+                sent_reason=sent_reason,
+                connected_at=connected_at,
+                last_frame_received_at=last_frame_received_at,
+            )
+            disconnect_logged = True
         finally:
             # If the device disconnected mid-capture, drop any partial
             # buffer rather than letting it leak into the next
@@ -1020,7 +1123,12 @@ class ESP32Manager:
             raise ConnectionError("No ESP32 device connected")
         await self._connection.send_tts_state(state, text)
 
-    async def send_listen_state(self, state: str, mode: str = "manual") -> None:
+    async def send_listen_state(
+        self,
+        state: str,
+        mode: str = "manual",
+        profile: str = "voice",
+    ) -> None:
         """Send a listen state notification to put the device into /
         out of listening mode (Issue #91).
 
@@ -1029,7 +1137,7 @@ class ESP32Manager:
         """
         if not self._connection or not self._connection.connected:
             raise ConnectionError("No ESP32 device connected")
-        await self._connection.send_listen_state(state, mode=mode)
+        await self._connection.send_listen_state(state, mode=mode, profile=profile)
 
     def get_status(self) -> dict[str, Any]:
         """Get current connection status."""

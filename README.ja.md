@@ -66,7 +66,13 @@
 | `clear_leds` | ベース部の RGB LED 12 個すべて消灯 | ✅ |
 | `say(text, voice?, speaker_id?, reference_audio?)` | gateway 側 TTS でデバイススピーカーから喋らせる。本文内の対応 emoji で、同じ呼び出し内にアバター表情も切り替え可能。デフォルトエンジンは **VOICEVOX**（別 HTTP サービスとして起動 — [TTS セットアップ](#4-オプション-tts-セットアップ-voicevox) 参照）。`[tts]` extras が必要 | ✅ |
 | `listen(duration_ms?, engine?, language?, model?, motion?, look_up_pitch?)` | デバイスマイクから短い発話をキャプチャし、gateway 側 STT で文字起こし。デフォルトエンジンは **faster-whisper**（ローカル動作・MIT — [STT セットアップ](#5-オプション-stt-セットアップ-faster-whisper) 参照）。任意の `motion` feedback で、キャプチャ中に `thinking` face を出したり、頭を上向きに傾けたりできます。`[stt-faster-whisper]`（または `[stt-openai]`）extras と、`listen` ワイヤタイプを受け付けるファームウェアが必要 | ✅ |
+| `beat_mode_start(motion_intensity?, sensitivity?, color?, duration_sec?)` | gateway-only の beat mode を開始する。既存の `listen` wire path でデバイス周辺音を継続キャプチャし、gateway 側で BPM を推定して、free-running の beat 同期 head sway とベースリング LED flash を動かす。`sensitivity` で静かな室内・大きな会場に合わせて onset floor を調整できる。beat mode は firmware の raw capture profile を要求し、音楽が発話向け AFE 抑制を bypass する。有効中の `listen()` は排他で失敗し、`say()` は割り込み可能で、発話後に beat mode が listening を再開する。Opus 復号用に `[stt]` extra が必要 | ✅ |
+| `beat_mode_stop()` | beat mode を停止し、best-effort で `listen.stop` を送る。最新の rolling audio buffer は、次の beat mode 開始または gateway 再起動まで clip 書き出し用に保持される | ✅ |
+| `beat_mode_update(motion_intensity?, sensitivity?, color?, blink_rate?, motion_enabled?, led_enabled?)` | キャプチャを再起動せずに beat mode の VJ パラメータを更新する | ✅ |
+| `beat_meta_snapshot()` | beat mode の最新メタデータを polling で取得する。active 状態、BPM、confidence、現在の sensitivity / minimum onset floor、最終 beat/audio timestamp、capture health、counter、現在の motion/LED パラメータを返す | ✅ |
+| `beat_clip_save(seconds?)` | 最新の rolling beat-mode 音声を 16 kHz mono WAV の一時ファイルとして保存し、パスと実際に保存できた秒数を返す。clip ファイルはディスクに残るため、不要になったら caller 側で削除してください | ✅ |
 | `stackchan_follow_pose_stream(action, url, ...)` | 任意の外部 WebSocket pose-stream を購読し、 受信した `yaw` / `pitch` フレームに対して 1:1 で首を追従させる（SCS0009 動作範囲内、 yaw ±90°、 pitch 5..85°）。 `action` は `start` / `stop` / `status` を切替。 軸反転、 pitch センター offset、 ダウンサンプル、 角速度クランプ、 exponential backoff 付き reconnect を内包し、 初期姿勢はデバイス側から seed することで初回フレームから角速度クランプが実サーボ位置を基準に効きます。 上流サーバ側のプロトコル（zero-offset コマンド、 ソース選択、 トランスポート）は本 gateway のスコープ外。 | ✅ |
+| `stackchan_follow_led_stream(action, url, target, ...)` | 任意の外部 WebSocket LED-frame stream を購読し、検証済みの `colors` フレームをベース部 12 LED または Port B WS2812 strip に転送する。`event` フレームは rate gate を bypass し、`continuous` フレームは `max_fps` で制限される | ✅ |
 
 詳細スキーマは `gateway/README.md` 参照。
 
@@ -370,7 +376,59 @@ path が出ます。リポジトリ直下の `user-defaults.toml.example` が
 smoothing_window = 1
 downsample_hz = 20
 max_step_deg = 30
+
+[tool.stackchan_follow_led_stream]
+target = "base_ring"
+max_fps = 30
+source_filter = "stage"
 ```
+
+### follow_led_stream WebSocket LED フレーム
+
+`stackchan_follow_led_stream(action="start", url=..., target=...)` は、
+gateway から外部 WebSocket URL へ client として接続します。受信した
+LED フレームを検証し、次のいずれかの target へ転送します:
+
+- `target="base_ring"` は内蔵 12 LED ベースリングへ `set_leds` 経由で
+  書き込みます。`led_count` は省略するか、`12` を指定します。
+- `target="port_b"` は Port B の WS2812 strip へ
+  `port_b_ws2812_set_strip` 経由で書き込みます。`led_count` は必須
+  (`1..256`) です。gateway は stream 開始時とデバイス再接続後に
+  `port_b_ws2812_init` を送ります。
+
+フレーム schema:
+
+```json
+{"ts": 1751234567890, "kind": "event", "colors": [[255, 0, 0], [0, 0, 255]]}
+```
+
+`ts` は数値必須です。`kind` は `event` または `continuous` です。
+`continuous` フレームは `max_fps`（既定値 `30`）まで downsample され、
+`event` フレームは beat flash が落ちないようにこの gate を bypass します。
+`colors` は `[r,g,b]` 整数 triple (`0..255`) の非空配列で、target の容量内に
+収まる必要があります。任意の文字列 field `source` / `frame` は
+`source_filter` / `frame_filter` で絞り込めます。
+
+手動 fallback に切替手順は不要です。stream 停止中または upstream WebSocket
+切断中でも、通常の `set_leds` / `port_b_ws2812_*` 呼び出しはそのまま
+利用できます。
+
+TOML overlay 例:
+
+```toml
+[tool.stackchan_follow_led_stream]
+target = "port_b"
+led_count = 24
+max_fps = 30
+source_filter = "stage"
+frame_filter = "calibrated"
+```
+
+### 実測ガイダンス（実機、家庭内 WLAN）
+
+- フレームあたりの往復時間: 中央値 約 40-50 ms → 実効ディスパッチレートは約 20 fps
+- 推奨 `max_fps: 20` — 実効レートを超える供給は continuous フレームのドロップが増えるだけ（event フレームはドロップされない）
+- ストリーム稼働中は gateway が WiFi パワーセーブを無効化する（停止時に復元）。無効化しない場合、ディスパッチ遅延が 300-1100 ms までスパイクする
 
 ### 4. オプション: TTS セットアップ (VOICEVOX)
 

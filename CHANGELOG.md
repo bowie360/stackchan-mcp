@@ -30,11 +30,64 @@ documented-only.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-12
+
+### Gateway
+
+- Added runtime-adjustable beat-mode onset sensitivity for venue tuning; the
+  default maps to the real-device verified 0.004 RMS floor, and metadata
+  snapshots report both the selected sensitivity and effective floor. (#301)
+- Added gateway-only beat mode MCP tools for continuous ambient audio capture
+  through the existing `listen` wire path, dependency-free BPM estimation,
+  beat-synced head sway/base-ring LED flashes, polling metadata snapshots, and
+  WAV clip export from a bounded rolling buffer. (#301)
+- Beat mode now requests the raw `listen` capture profile so ambient music
+  reaches the gateway without device-side speech AFE suppression. (#349)
+- Lowered the beat tracker's minimum onset RMS floor (0.025 → 0.004 full
+  scale) to match real-device microphone levels; onset detection now works
+  against actual ambient music (verified on device). The adaptive threshold
+  continues to prevent false onsets in quiet rooms. (#301)
+
+## [firmware-v1.16.0] - 2026-07-12
+
+### Firmware
+
+- Added an optional inbound `listen.profile` field with `voice` (default) and
+  `raw` modes; raw streams pre-AFE microphone PCM through the existing Opus
+  audio path for beat analysis. (#349)
+
+## [0.16.0] - 2026-07-11
+
+### Gateway
+
+- Added a `color_order` option (`grb` default, `rgb`) for Port B/C WS2812
+  gateway tools and `stackchan_follow_led_stream`, allowing RGB-wired LEDs to
+  render correct colors by swapping R/G in the gateway before relay. (#343)
+- Added `stackchan_follow_led_stream`, a gateway-side WebSocket LED-frame
+  subscriber for driving the base ring or a Port B WS2812 strip from external
+  `event` / `continuous` color frames. (#335)
+- Log ESP32 WebSocket disconnect close codes, reasons, close class, last-frame
+  age, and connection lifetime, and make the gateway keepalive policy explicit.
+  (#338)
+- Exposed the Port C WS2812 device tools and added `port_c` as a
+  `stackchan_follow_led_stream` target. (#340)
+
+## [firmware-v1.15.0] - 2026-07-11
+
+### Firmware
+
+- Added `self.port_c.ws2812.{init,set_pixel,set_strip,refresh,clear}` for a
+  WS2812-compatible strip on Grove Port C signal 1 (GPIO 17). (#340)
+
+## [0.15.0] - 2026-07-09
+
 ### Gateway
 
 - Re-dispatch the emoji-selected avatar face after successful speech playback,
   so emoji+text `say` calls keep the expression visible after lip-sync stops.
   (#296)
+
+## [firmware-v1.14.0] - 2026-07-09
 
 ### Firmware
 
@@ -1774,7 +1827,13 @@ uv tool install stackchan-mcp
   alias, so the previous floating pin no longer resolved. ([#47])
 
 
-[Unreleased]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/firmware-v1.13.1...HEAD
+[Unreleased]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/v0.16.0...v0.17.0
+[firmware-v1.16.0]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/firmware-v1.15.0...firmware-v1.16.0
+[0.16.0]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/v0.15.0...v0.16.0
+[firmware-v1.15.0]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/firmware-v1.14.0...firmware-v1.15.0
+[0.15.0]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/v0.14.0...v0.15.0
+[firmware-v1.14.0]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/firmware-v1.13.1...firmware-v1.14.0
 [firmware-v1.13.1]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/firmware-v1.13.0...firmware-v1.13.1
 [0.14.0]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kisaragi-mochi/stackchan-mcp/compare/v0.12.0...v0.13.0
