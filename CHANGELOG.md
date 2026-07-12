@@ -32,12 +32,19 @@ documented-only.
 
 ### Gateway
 
+- Added runtime-adjustable beat-mode onset sensitivity for venue tuning; the
+  default maps to the real-device verified 0.004 RMS floor, and metadata
+  snapshots report both the selected sensitivity and effective floor. (#301)
 - Added gateway-only beat mode MCP tools for continuous ambient audio capture
   through the existing `listen` wire path, dependency-free BPM estimation,
   beat-synced head sway/base-ring LED flashes, polling metadata snapshots, and
   WAV clip export from a bounded rolling buffer. (#301)
 - Beat mode now requests the raw `listen` capture profile so ambient music
   reaches the gateway without device-side speech AFE suppression. (#349)
+- Lowered the beat tracker's minimum onset RMS floor (0.025 → 0.004 full
+  scale) to match real-device microphone levels; onset detection now works
+  against actual ambient music (verified on device). The adaptive threshold
+  continues to prevent false onsets in quiet rooms. (#301)
 
 ### Firmware
 
