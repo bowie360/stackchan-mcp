@@ -506,6 +506,12 @@ class ESP32Manager:
         # session (e.g., a fresh reconnection or an MCP-driven listen()
         # that already took the slot).
         self._device_driven_session_id: str | None = None
+        # MCP-driven listen() stop signal. When the STT orchestrator is
+        # waiting out its capture window, an inbound firmware listen.stop
+        # (LCD tap / firmware-side VAD stop) sets this event so the MCP
+        # call can transcribe immediately instead of sleeping until
+        # duration_ms expires.
+        self._mcp_listen_stop_event: asyncio.Event | None = None
         self._tool_lane_locks = {
             "servo": asyncio.Lock(),
             "wifi": asyncio.Lock(),
@@ -764,6 +770,12 @@ class ESP32Manager:
                                 session_id, data.get("mode", ""),
                             )
                     elif state == "stop":
+                        if self._mcp_listen_stop_event is not None:
+                            self._mcp_listen_stop_event.set()
+                            logger.info(
+                                "mcp-listen stop signal set: session=%s",
+                                session_id,
+                            )
                         if self._device_driven_session_id == session_id:
                             self._device_driven_session_id = None
                             frames = stop_recording()

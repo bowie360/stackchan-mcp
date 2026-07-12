@@ -63,6 +63,7 @@ class _FakeESP32:
         self.tool_calls: list[tuple[str, dict[str, Any]]] = []
         self.events: list[tuple[str, Any]] = []
         self.listen_lock = asyncio.Lock()
+        self._mcp_listen_stop_event: asyncio.Event | None = None
         self.head_yaw = 12.0
         self.head_pitch = 24.0
         self._frames_to_inject = list(frames_to_inject or [])
@@ -196,6 +197,52 @@ async def test_pipeline_drives_listen_state_and_returns_text(fake_decode, monkey
     assert opts["language"] == "ja"
 
     # Recording slot was closed cleanly.
+    assert not is_recording()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_ends_capture_on_device_stop_signal(
+    fake_decode, monkeypatch
+):
+    """Firmware listen.stop ends MCP listen() before duration_ms expires."""
+
+    real_sleep = asyncio.sleep
+
+    async def fast_transition_sleep(delay):
+        if delay == orchestrator.LISTEN_START_TRANSITION_DELAY_S:
+            await real_sleep(0)
+            return
+        await real_sleep(delay)
+
+    monkeypatch.setattr(orchestrator.asyncio, "sleep", fast_transition_sleep)
+
+    class StopSignalingESP32(_FakeESP32):
+        async def send_listen_state(
+            self, state: str, mode: str = "manual"
+        ) -> None:
+            await super().send_listen_state(state, mode)
+            if state == "start":
+                assert self._mcp_listen_stop_event is not None
+                self._mcp_listen_stop_event.set()
+
+    engine = _CapturingEngine(text="早めに止まった")
+    frames = [b"opus_frame_0", b"opus_frame_1"]
+    esp32 = StopSignalingESP32(frames_to_inject=frames)
+    gateway = _FakeGateway(esp32)
+
+    reg = EngineRegistry()
+    reg.register(engine)
+
+    result = await listen_and_transcribe(
+        {"duration_ms": 30000, "engine": "faster-whisper"},
+        gateway=gateway,
+        registry=reg,
+    )
+
+    assert [s[0] for s in esp32.listen_states] == ["start", "stop"]
+    assert result["text"] == "早めに止まった"
+    assert result["frame_count"] == 2
+    assert esp32._mcp_listen_stop_event is None
     assert not is_recording()
 
 

@@ -445,6 +445,8 @@ async def listen_and_transcribe(
             # sending listen.start so we don't drop the first frame the
             # device emits the moment it lands in kDeviceStateListening.
             start_recording(session_id)
+            stop_event = asyncio.Event()
+            gateway.esp32._mcp_listen_stop_event = stop_event
             listen_start_sent = False
             try:
                 try:
@@ -461,7 +463,15 @@ async def listen_and_transcribe(
                 # ``TTS_START_TRANSITION_DELAY_S``).
                 await asyncio.sleep(LISTEN_START_TRANSITION_DELAY_S)
 
-                await asyncio.sleep(duration_ms / 1000.0)
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(), timeout=duration_ms / 1000.0
+                    )
+                    logger.info(
+                        "listen(): stop signal received, ending capture early"
+                    )
+                except asyncio.TimeoutError:
+                    pass
             finally:
                 # Cancellation-safe listen.stop. If the request is
                 # cancelled mid-capture (or any exception unwinds here)
@@ -498,6 +508,7 @@ async def listen_and_transcribe(
                             "best-effort listen.stop failed: %s", exc
                         )
                 frames = stop_recording()
+                gateway.esp32._mcp_listen_stop_event = None
 
             frame_count = len(frames)
             if frame_count == 0:
