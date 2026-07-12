@@ -462,9 +462,15 @@ def test_check_port_bind_error_when_host_not_local() -> None:
     assert info.startswith("bind error:")
 
 
-def test_check_port_unresolvable_host_returns_bind_error() -> None:
+def test_check_port_unresolvable_host_returns_bind_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``getaddrinfo`` failure is reported as a bind error, not a crash."""
-    # ``.invalid`` is reserved by RFC 6761 and never resolves.
+    def fail_getaddrinfo(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        raise socket.gaierror(-2, "Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fail_getaddrinfo)
+
     available, info = _check_port("nonexistent.invalid", 0)
     assert available is False
     assert info is not None

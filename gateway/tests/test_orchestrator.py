@@ -62,6 +62,7 @@ class _FakeESP32:
         self.device_connected = connected
         self.frames: list[bytes] = []
         self.tts_states: list[str] = []
+        self.subtitle_texts: list[str | None] = []
         self.tool_calls: list[tuple[str, dict[str, Any]]] = []
         self.avatar_error = avatar_error
         self.avatar_result = avatar_result
@@ -94,7 +95,10 @@ class _FakeESP32:
         self.frames.append(frame)
         self.events.append(("frame", frame))
 
-    async def send_tts_state(self, state: str) -> None:
+    async def send_tts_state(self, state: str, text: str | None = None) -> None:
+        if state == "sentence_start":
+            self.subtitle_texts.append(text)
+            return
         self.tts_states.append(state)
         self.events.append(("tts_state", state))
 
@@ -833,7 +837,7 @@ async def test_pipeline_translates_mid_stream_disconnect(fake_encode):
                 raise ConnectionError("simulated disconnect")
             self.frames.append(frame)
 
-        async def send_tts_state(self, state: str) -> None:
+        async def send_tts_state(self, state: str, text: str | None = None) -> None:
             # The disconnect can race the stop notification; if the
             # caller still tries to send it after the failure, simulate
             # a benign no-op rather than raising again.
@@ -944,7 +948,7 @@ async def test_pipeline_disconnect_before_tts_start(fake_encode):
             self.tts_states = []
             self.tts_lock = asyncio.Lock()
 
-        async def send_tts_state(self, state: str) -> None:
+        async def send_tts_state(self, state: str, text: str | None = None) -> None:
             self.tts_states.append(state)
             if state == "start":
                 raise ConnectionError("device dropped during start")
