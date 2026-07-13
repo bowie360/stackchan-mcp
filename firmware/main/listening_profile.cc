@@ -24,3 +24,7 @@ ListeningProfile ListeningProfileAfterStop(ListeningProfile profile) {
     (void)profile;
     return kListeningProfileVoice;
 }
+
+bool ShouldUseVadSilenceStop(ListeningProfile profile) {
+    return profile == kListeningProfileVoice;
+}

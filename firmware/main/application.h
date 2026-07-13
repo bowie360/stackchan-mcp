@@ -158,12 +158,11 @@ private:
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     int clock_ticks_ = 0;
     // [patch: vad-silence-stop] VAD 静音超时自动停止录音（替代纯 30s 计时器）。
-    // Listening 期间持续静音超过 VAD_SILENCE_TIMEOUT_US 则 StopListening。
+    // Listening 期间持续静音超过 kVadSilenceTimeoutUs 则 StopListening。
     // 检查挂在每秒 CLOCK_TICK（on_vad_change 仅状态变化时触发，静音期间无 event
     // 无法驱动超时）。board 层 stackchan.cc 的 30s 计时器仍作兜底。
     // 详见 docs/wake-word-firmware-fix.md 方案 2C。
     int64_t vad_silence_start_us_ = 0;
-    static constexpr int64_t VAD_SILENCE_TIMEOUT_US = 1500000;  // 1.5s
     TaskHandle_t activation_task_handle_ = nullptr;
 
 

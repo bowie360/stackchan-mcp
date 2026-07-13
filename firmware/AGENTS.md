@@ -87,6 +87,15 @@ esptool.py --chip esp32s3 --port /dev/cu.usbmodemXXXX -b 460800 \
   write_flash 0x20000 build/xiaozhi.bin
 ```
 
+本机常用 CoreS3 端口为 `/dev/cu.usbmodem1101`，日常更新可直接执行：
+
+```bash
+cd /home/bowie/stackchan-mcp/firmware
+esptool.py --chip esp32s3 --port /dev/cu.usbmodem1101 -b 460800 \
+  --before default_reset --after hard_reset \
+  write_flash 0x20000 build/xiaozhi.bin
+```
+
 **Do NOT flash `merged-binary.bin` to `0x0` in routine work** — this overwrites bootloader through partition table and risks NVS data loss.
 
 ### Serial monitor (post-flash)

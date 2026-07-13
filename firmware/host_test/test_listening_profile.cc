@@ -29,3 +29,15 @@ TEST(ListeningProfileTest, RawStopRestoresVoiceProfile) {
     ASSERT_EQ(raw.profile, kListeningProfileRaw);
     EXPECT_EQ(ListeningProfileAfterStop(raw.profile), kListeningProfileVoice);
 }
+
+TEST(ListeningProfileTest, VoiceProfileUsesVadSilenceStop) {
+    EXPECT_TRUE(ShouldUseVadSilenceStop(kListeningProfileVoice));
+}
+
+TEST(ListeningProfileTest, RawProfileBypassesVadSilenceStop) {
+    EXPECT_FALSE(ShouldUseVadSilenceStop(kListeningProfileRaw));
+}
+
+TEST(ListeningProfileTest, VadSilenceTimeoutIsTwoSeconds) {
+    EXPECT_EQ(kVadSilenceTimeoutUs, 2000000);
+}

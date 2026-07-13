@@ -275,15 +275,17 @@ void Application::Run() {
                 SystemInfo::PrintHeapStats();
             }
 
-            // [patch: vad-silence-stop] Listening 期间静音超 1.5s 自动停止。
+            // [patch: vad-silence-stop] Listening 期间静音超 2s 自动停止。
             // CLOCK_TICK 每 1s 触发：说话中重置计时，静音中累计，超时则 StopListening。
-            // 非 Listening 状态清零，避免跨状态残留。
-            if (GetDeviceState() == kDeviceStateListening) {
+            // raw profile 用于 beat mode / 环境音，音乐通常不会被语音 VAD 判定为 voice，
+            // 因此跳过静音停止；非 Listening 状态清零，避免跨状态残留。
+            if (GetDeviceState() == kDeviceStateListening &&
+                ShouldUseVadSilenceStop(listening_profile_)) {
                 if (audio_service_.IsVoiceDetected()) {
                     vad_silence_start_us_ = 0;
                 } else if (vad_silence_start_us_ == 0) {
                     vad_silence_start_us_ = esp_timer_get_time();
-                } else if (esp_timer_get_time() - vad_silence_start_us_ >= VAD_SILENCE_TIMEOUT_US) {
+                } else if (esp_timer_get_time() - vad_silence_start_us_ >= kVadSilenceTimeoutUs) {
                     ESP_LOGI(TAG, "VAD silence timeout, stopping listening");
                     vad_silence_start_us_ = 0;
                     StopListening();
