@@ -17,6 +17,10 @@ class BeatSnapshot:
     confidence: float
     last_beat_at: float | None
     onset_count: int
+    onset_detected: bool = False
+    onset_at: float | None = None
+    rms: float = 0.0
+    threshold: float = 0.0
 
 
 class BeatTracker:
@@ -111,13 +115,19 @@ class BeatTracker:
                 or onset_at - self._last_beat_at >= self.onset_refractory_s
             )
 
-            if rms_norm >= threshold and rising and last_gap_ok:
+            onset_detected = rms_norm >= threshold and rising and last_gap_ok
+            if onset_detected:
                 self._record_onset(onset_at)
 
             self._energy_history.append((chunk_at, rms_norm))
             self._last_rms = rms_norm
             self._update_bpm_locked(chunk_at)
-            return self._snapshot_locked()
+            return self._snapshot_locked(
+                onset_detected=onset_detected,
+                onset_at=onset_at if onset_detected else None,
+                rms=rms_norm,
+                threshold=threshold,
+            )
 
     def snapshot(self) -> BeatSnapshot:
         """Return the latest beat metadata."""
@@ -187,10 +197,21 @@ class BeatTracker:
         self._bpm = round(bpm, 2)
         self._confidence = round(density * stability, 3)
 
-    def _snapshot_locked(self) -> BeatSnapshot:
+    def _snapshot_locked(
+        self,
+        *,
+        onset_detected: bool = False,
+        onset_at: float | None = None,
+        rms: float = 0.0,
+        threshold: float = 0.0,
+    ) -> BeatSnapshot:
         return BeatSnapshot(
             bpm=self._bpm,
             confidence=self._confidence,
             last_beat_at=self._last_beat_at,
             onset_count=self._onset_count,
+            onset_detected=onset_detected,
+            onset_at=onset_at,
+            rms=rms,
+            threshold=threshold,
         )

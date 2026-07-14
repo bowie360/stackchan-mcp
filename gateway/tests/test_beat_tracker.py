@@ -58,6 +58,19 @@ def test_tracker_stays_unconfident_without_onsets() -> None:
     assert snapshot.confidence == 0.0
 
 
+def test_process_pcm_exposes_immediate_onset_before_bpm_is_stable() -> None:
+    tracker = BeatTracker(sample_rate=DEVICE_SAMPLE_RATE, min_onset_rms=0.001)
+    pcm = (12000).to_bytes(2, "little", signed=True) * 320
+
+    snapshot = tracker.process_pcm(pcm, received_at=1.0)
+
+    assert snapshot.onset_detected is True
+    assert snapshot.onset_at is not None
+    assert snapshot.rms > 0
+    assert snapshot.threshold > 0
+    assert snapshot.bpm is None
+
+
 def test_min_onset_rms_setter_preserves_tracker_history() -> None:
     tracker = BeatTracker(sample_rate=DEVICE_SAMPLE_RATE)
     with tracker._lock:
