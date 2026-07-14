@@ -44,6 +44,7 @@ DEFAULT_SENSITIVITY = 0.5
 MIN_ONSET_RMS_LEAST_SENSITIVE = 0.025
 MIN_ONSET_RMS_DEFAULT = 0.004
 MIN_ONSET_RMS_MOST_SENSITIVE = 0.001
+LIGHT_MODES = frozenset({"rainbow_flow", "rainbow_pulse", "soft_breathe", "solid_pulse"})
 _OWNER_GENERATIONS = count(1)
 
 
@@ -99,6 +100,15 @@ def _validate_color(value: tuple[int, int, int]) -> tuple[int, int, int]:
     return channels[0], channels[1], channels[2]
 
 
+def _validate_light_mode(value: str) -> str:
+    if value not in LIGHT_MODES:
+        raise ValueError(
+            "light_mode must be one of: rainbow_flow, rainbow_pulse, "
+            "soft_breathe, solid_pulse"
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class BeatModeConfig:
     motion_intensity: float = 0.5
@@ -108,6 +118,7 @@ class BeatModeConfig:
     blink_rate: float = 1.0
     motion_enabled: bool = False
     led_enabled: bool = True
+    light_mode: str = "rainbow_flow"
     capture_seconds: float = CAPTURE_SECONDS_DEFAULT
 
     def __post_init__(self) -> None:
@@ -142,6 +153,7 @@ class BeatModeConfig:
             raise ValueError("motion_enabled must be a boolean")
         if not isinstance(self.led_enabled, bool):
             raise ValueError("led_enabled must be a boolean")
+        object.__setattr__(self, "light_mode", _validate_light_mode(self.light_mode))
 
         if not _is_finite_number(self.capture_seconds) or self.capture_seconds <= 0:
             raise ValueError("capture_seconds must be > 0")
@@ -377,6 +389,7 @@ class BeatMode:
         blink_rate: float | None = None,
         motion_enabled: bool | None = None,
         led_enabled: bool | None = None,
+        light_mode: str | None = None,
     ) -> dict[str, Any]:
         updates: dict[str, Any] = {}
         if motion_intensity is not None:
@@ -391,6 +404,8 @@ class BeatMode:
             updates["motion_enabled"] = motion_enabled
         if led_enabled is not None:
             updates["led_enabled"] = led_enabled
+        if light_mode is not None:
+            updates["light_mode"] = light_mode
         self._config = replace(self._config, **updates)
         if "sensitivity" in updates:
             self._tracker.set_min_onset_rms(self._config.min_onset_rms)
@@ -463,6 +478,7 @@ class BeatMode:
                 "target": "base_ring",
                 "color": list(self._config.color),
                 "blink_rate": self._config.blink_rate,
+                "light_mode": self._config.light_mode,
                 "commands_sent": self._led_commands,
             },
             "onset_actions": {
@@ -792,11 +808,14 @@ class BeatMode:
     async def _flash_led(
         self, cfg: BeatModeConfig, beat_period: float, *, source: str = "tempo"
     ) -> None:
-        colors = self._rainbow_colors()
+        colors = self._flash_colors(cfg)
         dim = [tuple(int(channel * 0.12) for channel in color) for color in colors]
         flash_s = min(0.09, max(0.03, beat_period * 0.18))
         if await self._set_base_ring_colors(colors):
-            self._rainbow_hue = (self._rainbow_hue + 1.0 / BASE_RING_LED_COUNT) % 1.0
+            if cfg.light_mode == "rainbow_flow":
+                self._rainbow_hue = (
+                    self._rainbow_hue + 1.0 / BASE_RING_LED_COUNT
+                ) % 1.0
             if source == "onset":
                 self._onset_led_actions += 1
             else:
@@ -804,10 +823,17 @@ class BeatMode:
             await self._sleep_or_stop(flash_s)
             await self._set_base_ring_colors(dim)
 
-    def _rainbow_colors(self) -> list[tuple[int, int, int]]:
+    def _flash_colors(self, cfg: BeatModeConfig) -> list[tuple[int, int, int]]:
+        if cfg.light_mode == "solid_pulse":
+            return [cfg.color] * BASE_RING_LED_COUNT
+        if cfg.light_mode == "soft_breathe":
+            return self._rainbow_colors(value=0.55)
+        return self._rainbow_colors()
+
+    def _rainbow_colors(self, *, value: float = 1.0) -> list[tuple[int, int, int]]:
         return [
             tuple(round(channel * 255) for channel in colorsys.hsv_to_rgb(
-                (self._rainbow_hue + index / BASE_RING_LED_COUNT) % 1.0, 0.9, 1.0
+                (self._rainbow_hue + index / BASE_RING_LED_COUNT) % 1.0, 0.9, value
             ))
             for index in range(BASE_RING_LED_COUNT)
         ]
@@ -917,6 +943,7 @@ async def start_beat_mode(gateway: Any, config: BeatModeConfig) -> dict[str, Any
                 sensitivity=config.sensitivity,
                 motion_enabled=config.motion_enabled,
                 led_enabled=config.led_enabled,
+                light_mode=config.light_mode,
             )
             return _mode.status()
 
@@ -948,6 +975,7 @@ async def update_beat_mode(
     blink_rate: float | None = None,
     motion_enabled: bool | None = None,
     led_enabled: bool | None = None,
+    light_mode: str | None = None,
 ) -> dict[str, Any]:
     async with _get_mode_lock():
         if _mode is None or not _mode.active:
@@ -959,6 +987,7 @@ async def update_beat_mode(
             blink_rate=blink_rate,
             motion_enabled=motion_enabled,
             led_enabled=led_enabled,
+            light_mode=light_mode,
         )
 
 

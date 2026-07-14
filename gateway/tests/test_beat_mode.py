@@ -161,8 +161,29 @@ async def test_onset_flash_uses_rainbow_without_head_command() -> None:
     assert len({tuple(color) for color in colors}) > 3
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "light_mode", ["rainbow_flow", "rainbow_pulse", "soft_breathe", "solid_pulse"]
+)
+async def test_light_modes_flash_the_ring_twice(light_mode: str) -> None:
+    gateway = _FakeGateway()
+    mode = BeatMode(
+        gateway,
+        BeatModeConfig(light_mode=light_mode, color=(255, 64, 0)),
+    )
+
+    await mode._flash_led(mode._config, 0.5, source="onset")
+
+    calls = [
+        call for call in gateway.esp32.tool_calls if call[0] == "self.led.set_many"
+    ]
+    assert len(calls) == 2
+    assert all(len(json.loads(args["colors"])) == 12 for _, args in calls)
+
+
 def test_beat_config_defaults_to_lights_only() -> None:
     assert BeatModeConfig().motion_enabled is False
+    assert BeatModeConfig().light_mode == "rainbow_flow"
 
 
 @pytest.mark.asyncio
@@ -507,6 +528,11 @@ async def test_update_applies_runtime_parameters(fake_decode) -> None:
     assert status["led"]["color"] == [255, 64, 0]
     assert status["led"]["blink_rate"] == 2.0
     assert status["led"]["enabled"] is False
+
+
+def test_beat_config_rejects_unknown_light_mode() -> None:
+    with pytest.raises(ValueError, match="light_mode"):
+        BeatModeConfig(light_mode="strobe")
 
 
 @pytest.mark.asyncio
