@@ -46,3 +46,4 @@ firmware/main/boards/stackchan/avatar_images.local.h
 
 # uv lockfile is OK to commit
 # (allow-listed by absence of uv.lock entry above)
+.worktrees/
