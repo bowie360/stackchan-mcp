@@ -1722,6 +1722,8 @@ async def test_list_tools_includes_beat_mode_tools():
     sensitivity_description = start_schema["properties"]["sensitivity"]["description"]
     assert "0.5 => 0.004" in sensitivity_description
     assert start_schema["properties"]["color"]["minItems"] == 3
+    assert start_schema["properties"]["light_mode"]["default"] == "rainbow_flow"
+    assert start_schema["properties"]["motion_enabled"]["default"] is False
     assert "listen() calls fail fast" in tools["beat_mode_start"].description
     assert "base ring" in tools["beat_mode_start"].description
 
@@ -1729,6 +1731,9 @@ async def test_list_tools_includes_beat_mode_tools():
     assert update_schema["properties"]["sensitivity"]["minimum"] == 0
     assert update_schema["properties"]["blink_rate"]["minimum"] == 0.25
     assert update_schema["properties"]["motion_enabled"]["type"] == "boolean"
+    assert update_schema["properties"]["light_mode"]["enum"] == [
+        "rainbow_flow", "rainbow_pulse", "soft_breathe", "solid_pulse"
+    ]
     assert "persists on disk" in tools["beat_clip_save"].description
     assert "caller is responsible" in tools["beat_clip_save"].description
 
@@ -1767,6 +1772,10 @@ async def test_beat_mode_start_arguments_propagate(monkeypatch):
                     "sensitivity": 0.25,
                     "color": [10, 20, 30],
                     "duration_sec": 12,
+                    "motion_enabled": True,
+                    "led_enabled": True,
+                    "blink_rate": 4.0,
+                    "light_mode": "solid_pulse",
                 },
             },
         )
@@ -1778,6 +1787,10 @@ async def test_beat_mode_start_arguments_propagate(monkeypatch):
     assert captured["cfg"].sensitivity == 0.25
     assert captured["cfg"].color == (10, 20, 30)
     assert captured["cfg"].duration_sec == 12
+    assert captured["cfg"].motion_enabled is True
+    assert captured["cfg"].led_enabled is True
+    assert captured["cfg"].blink_rate == 4.0
+    assert captured["cfg"].light_mode == "solid_pulse"
 
 
 @pytest.mark.asyncio

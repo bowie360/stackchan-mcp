@@ -752,12 +752,34 @@ async def _handle_beat_mode_start(
     ):
         return _beat_error("duration_sec must be a positive integer or null")
 
+    blink_rate = arguments.get("blink_rate", 1.0)
+    if not _is_number_arg(blink_rate) or not 0.25 <= float(blink_rate) <= 4.0:
+        return _beat_error("blink_rate must be a number in 0.25..4")
+
+    for name, default in (("motion_enabled", False), ("led_enabled", True)):
+        value = arguments.get(name, default)
+        if not isinstance(value, bool):
+            return _beat_error(f"{name} must be a boolean")
+
+    light_mode = arguments.get("light_mode", "rainbow_flow")
+    if light_mode not in {
+        "rainbow_flow", "rainbow_pulse", "soft_breathe", "solid_pulse"
+    }:
+        return _beat_error(
+            "light_mode must be one of: rainbow_flow, rainbow_pulse, "
+            "soft_breathe, solid_pulse"
+        )
+
     try:
         cfg = BeatModeConfig(
             motion_intensity=float(motion_intensity),
             sensitivity=float(sensitivity),
             color=color,
             duration_sec=duration_sec,
+            blink_rate=float(blink_rate),
+            motion_enabled=arguments.get("motion_enabled", False),
+            led_enabled=arguments.get("led_enabled", True),
+            light_mode=light_mode,
         )
         status = await start_beat_mode(gateway, cfg)
     except (ValueError, RuntimeError) as exc:
@@ -802,6 +824,15 @@ async def _handle_beat_mode_update(arguments: dict[str, Any]) -> list[TextConten
         if not _is_number_arg(value) or not 0.25 <= float(value) <= 4.0:
             return _beat_error("blink_rate must be a number in 0.25..4")
         updates["blink_rate"] = float(value)
+
+    if "light_mode" in arguments:
+        value = arguments["light_mode"]
+        if value not in {"rainbow_flow", "rainbow_pulse", "soft_breathe", "solid_pulse"}:
+            return _beat_error(
+                "light_mode must be one of: rainbow_flow, rainbow_pulse, "
+                "soft_breathe, solid_pulse"
+            )
+        updates["light_mode"] = value
 
     for name in ("motion_enabled", "led_enabled"):
         if name in arguments:
@@ -2423,8 +2454,8 @@ def create_server(notify_config: NotifyConfig | None = None) -> StackChanServer:
                     "Start gateway-side beat mode. The gateway reuses the "
                     "existing listen wire path to capture ambient device audio, "
                     "decodes it to 16 kHz mono PCM, estimates beat/BPM locally, "
-                    "and drives a free-running beat-synced head sway plus base "
-                    "ring LED flash. While active, listen() calls fail fast "
+                    "and drives base ring LED flashes; head following is opt-in. "
+                    "While active, listen() calls fail fast "
                     "because beat mode owns the microphone capture slot. say() "
                     "is allowed to interrupt; beat mode re-sends listen.start "
                     "after speech or reconnect when audio frames stop arriving. "
@@ -2468,6 +2499,27 @@ def create_server(notify_config: NotifyConfig | None = None) -> StackChanServer:
                                 "Optional base-ring flash color as [r, g, b]. "
                                 "Defaults to cyan-blue."
                             ),
+                        },
+                        "blink_rate": {
+                            "type": "number",
+                            "default": 1.0,
+                            "minimum": 0.25,
+                            "maximum": 4,
+                        },
+                        "motion_enabled": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Enable optional head following; off by default.",
+                        },
+                        "led_enabled": {
+                            "type": "boolean",
+                            "default": True,
+                        },
+                        "light_mode": {
+                            "type": "string",
+                            "enum": ["rainbow_flow", "rainbow_pulse", "soft_breathe", "solid_pulse"],
+                            "default": "rainbow_flow",
+                            "description": "Base-ring lighting effect; rainbow_flow is the default.",
                         },
                         "duration_sec": {
                             "type": "integer",
@@ -2533,6 +2585,10 @@ def create_server(notify_config: NotifyConfig | None = None) -> StackChanServer:
                                 "LED flash cadence multiplier relative to the "
                                 "detected beat period."
                             ),
+                        },
+                        "light_mode": {
+                            "type": "string",
+                            "enum": ["rainbow_flow", "rainbow_pulse", "soft_breathe", "solid_pulse"],
                         },
                         "motion_enabled": {"type": "boolean"},
                         "led_enabled": {"type": "boolean"},
