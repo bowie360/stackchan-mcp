@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import Any
 import wave
@@ -144,6 +145,24 @@ def test_sensitivity_mapping_anchors() -> None:
     assert min_onset_rms_for_sensitivity(0.5) == pytest.approx(0.004)
     assert min_onset_rms_for_sensitivity(1.0) == pytest.approx(0.001)
     assert BeatModeConfig().min_onset_rms == pytest.approx(0.004)
+
+
+@pytest.mark.asyncio
+async def test_onset_flash_uses_rainbow_without_head_command() -> None:
+    gateway = _FakeGateway()
+    mode = BeatMode(gateway, BeatModeConfig(motion_enabled=False))
+
+    await mode._flash_led(mode._config, 0.5, source="onset")
+
+    names = [name for name, _args in gateway.esp32.tool_calls]
+    assert names == ["self.led.set_many", "self.led.set_many"]
+    colors = json.loads(gateway.esp32.tool_calls[0][1]["colors"])
+    assert len(colors) == 12
+    assert len({tuple(color) for color in colors}) > 3
+
+
+def test_beat_config_defaults_to_lights_only() -> None:
+    assert BeatModeConfig().motion_enabled is False
 
 
 @pytest.mark.asyncio
@@ -309,7 +328,7 @@ async def test_clip_save_writes_recent_pcm_as_wav(fake_decode) -> None:
 
 
 @pytest.mark.asyncio
-async def test_onset_outputs_without_stable_bpm(
+async def test_onset_lights_without_stable_bpm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gateway = _FakeGateway()
@@ -330,12 +349,9 @@ async def test_onset_outputs_without_stable_bpm(
     )
 
     await mode._handle_decoded_pcm(b"\x00\x00" * 320)
-    await _wait_until(lambda: len(gateway.esp32.tool_calls) >= 2)
+    await _wait_until(lambda: len(gateway.esp32.tool_calls) >= 1)
 
-    assert {name for name, _args in gateway.esp32.tool_calls} >= {
-        "self.robot.set_head_angles",
-        "self.led.set_many",
-    }
+    assert {name for name, _args in gateway.esp32.tool_calls} == {"self.led.set_many"}
 
 
 @pytest.mark.asyncio

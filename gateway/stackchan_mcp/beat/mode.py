@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import colorsys
 from collections import deque
 from dataclasses import dataclass, replace
 from itertools import count
@@ -105,7 +106,7 @@ class BeatModeConfig:
     color: tuple[int, int, int] = (0, 160, 255)
     duration_sec: int | None = None
     blink_rate: float = 1.0
-    motion_enabled: bool = True
+    motion_enabled: bool = False
     led_enabled: bool = True
     capture_seconds: float = CAPTURE_SECONDS_DEFAULT
 
@@ -249,6 +250,7 @@ class BeatMode:
         self._tempo_motion_actions = 0
         self._tempo_led_actions = 0
         self._onset_side = 1
+        self._rainbow_hue = 0.0
         self._onset_motion_task: asyncio.Task[None] | None = None
         self._onset_led_task: asyncio.Task[None] | None = None
         self._pending_onset_motion: tuple[int, BeatModeConfig] | None = None
@@ -790,22 +792,33 @@ class BeatMode:
     async def _flash_led(
         self, cfg: BeatModeConfig, beat_period: float, *, source: str = "tempo"
     ) -> None:
-        color = cfg.color
-        dim = tuple(int(channel * 0.12) for channel in color)
+        colors = self._rainbow_colors()
+        dim = [tuple(int(channel * 0.12) for channel in color) for color in colors]
         flash_s = min(0.09, max(0.03, beat_period * 0.18))
-        if await self._set_base_ring_color(color):
+        if await self._set_base_ring_colors(colors):
+            self._rainbow_hue = (self._rainbow_hue + 1.0 / BASE_RING_LED_COUNT) % 1.0
             if source == "onset":
                 self._onset_led_actions += 1
             else:
                 self._tempo_led_actions += 1
             await self._sleep_or_stop(flash_s)
-            await self._set_base_ring_color(dim)
+            await self._set_base_ring_colors(dim)
+
+    def _rainbow_colors(self) -> list[tuple[int, int, int]]:
+        return [
+            tuple(round(channel * 255) for channel in colorsys.hsv_to_rgb(
+                (self._rainbow_hue + index / BASE_RING_LED_COUNT) % 1.0, 0.9, 1.0
+            ))
+            for index in range(BASE_RING_LED_COUNT)
+        ]
 
     async def _set_base_ring_color(self, color: tuple[int, int, int]) -> bool:
-        colors = [list(color) for _ in range(BASE_RING_LED_COUNT)]
+        return await self._set_base_ring_colors([color] * BASE_RING_LED_COUNT)
+
+    async def _set_base_ring_colors(self, colors: list[tuple[int, int, int]]) -> bool:
         ok = await self._call_tool(
             "self.led.set_many",
-            {"colors": json.dumps(colors)},
+            {"colors": json.dumps([list(color) for color in colors])},
         )
         if ok:
             self._led_commands += 1
