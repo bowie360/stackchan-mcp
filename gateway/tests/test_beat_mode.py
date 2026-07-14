@@ -20,6 +20,7 @@ from stackchan_mcp.beat.mode import (
     BeatModeConfig,
     min_onset_rms_for_sensitivity,
 )
+from stackchan_mcp.beat.tracker import BeatSnapshot
 from stackchan_mcp.stt import EngineRegistry, STTEngine, listen_and_transcribe
 from stackchan_mcp.stt.audio_utils import DEVICE_SAMPLE_RATE
 
@@ -305,6 +306,65 @@ async def test_clip_save_writes_recent_pcm_as_wav(fake_decode) -> None:
 
     assert result["seconds"] == 0.25
     assert result["active"] is True
+
+
+@pytest.mark.asyncio
+async def test_onset_outputs_without_stable_bpm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = _FakeGateway()
+    mode = BeatMode(gateway, BeatModeConfig())
+    monkeypatch.setattr(
+        mode._tracker,
+        "process_pcm",
+        lambda *_args, **_kwargs: BeatSnapshot(
+            bpm=None,
+            confidence=0.0,
+            last_beat_at=1.0,
+            onset_count=1,
+            onset_detected=True,
+            onset_at=1.0,
+            rms=0.1,
+            threshold=0.01,
+        ),
+    )
+
+    await mode._handle_decoded_pcm(b"\x00\x00" * 320)
+    await _wait_until(lambda: len(gateway.esp32.tool_calls) >= 2)
+
+    assert {name for name, _args in gateway.esp32.tool_calls} >= {
+        "self.robot.set_head_angles",
+        "self.led.set_many",
+    }
+
+
+@pytest.mark.asyncio
+async def test_onsets_coalesce_while_led_output_is_slow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mode = BeatMode(_FakeGateway(), BeatModeConfig(motion_enabled=False))
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def blocked_flash(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(mode, "_flash_led", blocked_flash)
+    mode._schedule_onset_outputs()
+    await started.wait()
+    first_task = mode._onset_led_task
+    for _ in range(20):
+        mode._schedule_onset_outputs()
+
+    assert mode._onset_led_task is first_task
+    release.set()
+    assert first_task is not None
+    await first_task
+    assert calls == 2
 
 
 @pytest.mark.asyncio

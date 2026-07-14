@@ -244,6 +244,15 @@ class BeatMode:
         self._decode_errors = 0
         self._motion_commands = 0
         self._led_commands = 0
+        self._onset_motion_actions = 0
+        self._onset_led_actions = 0
+        self._tempo_motion_actions = 0
+        self._tempo_led_actions = 0
+        self._onset_side = 1
+        self._onset_motion_task: asyncio.Task[None] | None = None
+        self._onset_led_task: asyncio.Task[None] | None = None
+        self._pending_onset_motion: tuple[int, BeatModeConfig] | None = None
+        self._pending_onset_led: BeatModeConfig | None = None
         self._watchdog_attempts = 0
         self._restart_backoff_s = LISTEN_RESTART_INITIAL_BACKOFF_S
 
@@ -331,10 +340,15 @@ class BeatMode:
         self._release_recording_slot()
 
         current = asyncio.current_task()
-        for task in self._tasks:
+        output_tasks = (self._onset_motion_task, self._onset_led_task)
+        for task in [*self._tasks, *output_tasks]:
+            if task is None:
+                continue
             if task not in (current, caller) and not task.done():
                 task.cancel()
-        for task in self._tasks:
+        for task in [*self._tasks, *output_tasks]:
+            if task is None:
+                continue
             if task in (current, caller):
                 continue
             try:
@@ -344,6 +358,10 @@ class BeatMode:
             except Exception as exc:  # pragma: no cover - defensive
                 self._last_error = str(exc)
         self._tasks = []
+        self._onset_motion_task = None
+        self._onset_led_task = None
+        self._pending_onset_motion = None
+        self._pending_onset_led = None
         self._active = False
         self._capture_state = "stopped"
         self._stopped_at = asyncio.get_running_loop().time()
@@ -444,6 +462,14 @@ class BeatMode:
                 "color": list(self._config.color),
                 "blink_rate": self._config.blink_rate,
                 "commands_sent": self._led_commands,
+            },
+            "onset_actions": {
+                "motion": self._onset_motion_actions,
+                "led": self._onset_led_actions,
+            },
+            "tempo_actions": {
+                "motion": self._tempo_motion_actions,
+                "led": self._tempo_led_actions,
             },
         }
 
@@ -623,13 +649,46 @@ class BeatMode:
             if not pcm:
                 self._frames_dropped += 1
                 continue
-            now = asyncio.get_running_loop().time()
-            self._capture.append(pcm)
-            self._tracker.process_pcm(pcm, received_at=now)
-            self._last_audio_at = now
-            self._frames_decoded += 1
-            self._capture_state = "listening"
-            self._restart_backoff_s = LISTEN_RESTART_INITIAL_BACKOFF_S
+            await self._handle_decoded_pcm(pcm)
+
+    async def _handle_decoded_pcm(self, pcm: bytes) -> None:
+        now = asyncio.get_running_loop().time()
+        self._capture.append(pcm)
+        beat = self._tracker.process_pcm(pcm, received_at=now)
+        self._last_audio_at = now
+        self._frames_decoded += 1
+        self._capture_state = "listening"
+        self._restart_backoff_s = LISTEN_RESTART_INITIAL_BACKOFF_S
+        if beat.onset_detected:
+            self._schedule_onset_outputs()
+
+    def _schedule_onset_outputs(self) -> None:
+        cfg = self._config
+        self._onset_side *= -1
+        if cfg.motion_enabled:
+            self._pending_onset_motion = (self._onset_side, cfg)
+            if self._onset_motion_task is None or self._onset_motion_task.done():
+                self._onset_motion_task = asyncio.create_task(
+                    self._run_onset_motion(), name="stackchan-beat-mode-onset-motion"
+                )
+        if cfg.led_enabled:
+            self._pending_onset_led = cfg
+            if self._onset_led_task is None or self._onset_led_task.done():
+                self._onset_led_task = asyncio.create_task(
+                    self._run_onset_led(), name="stackchan-beat-mode-onset-led"
+                )
+
+    async def _run_onset_motion(self) -> None:
+        while self._pending_onset_motion is not None and not self._stop_event.is_set():
+            side, cfg = self._pending_onset_motion
+            self._pending_onset_motion = None
+            await self._send_motion(side, cfg, source="onset")
+
+    async def _run_onset_led(self) -> None:
+        while self._pending_onset_led is not None and not self._stop_event.is_set():
+            cfg = self._pending_onset_led
+            self._pending_onset_led = None
+            await self._flash_led(cfg, 0.5, source="onset")
 
     async def _listen_watchdog_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -690,14 +749,14 @@ class BeatMode:
 
             if cfg.motion_enabled and now >= next_motion_at:
                 side *= -1
-                work.append(asyncio.create_task(self._send_motion(side, cfg)))
+                work.append(asyncio.create_task(self._send_motion(side, cfg, source="tempo")))
                 while next_motion_at <= now:
                     next_motion_at += beat_period
             elif not cfg.motion_enabled:
                 next_motion_at = now + beat_period
 
             if cfg.led_enabled and now >= next_led_at:
-                work.append(asyncio.create_task(self._flash_led(cfg, beat_period)))
+                work.append(asyncio.create_task(self._flash_led(cfg, beat_period, source="tempo")))
                 while next_led_at <= now:
                     next_led_at += led_period
             elif not cfg.led_enabled:
@@ -710,7 +769,9 @@ class BeatMode:
             sleep_until = min(next_motion_at, next_led_at)
             await self._sleep_or_stop(max(0.02, min(0.2, sleep_until - now)))
 
-    async def _send_motion(self, side: int, cfg: BeatModeConfig) -> None:
+    async def _send_motion(
+        self, side: int, cfg: BeatModeConfig, *, source: str = "tempo"
+    ) -> None:
         intensity = cfg.motion_intensity
         yaw = int(round(_clamp(side * 14.0 * intensity, SERVO_YAW_MIN, SERVO_YAW_MAX)))
         pitch = int(round(_clamp(45.0 + 4.0 * intensity, SERVO_PITCH_MIN, SERVO_PITCH_MAX)))
@@ -721,12 +782,22 @@ class BeatMode:
         )
         if ok:
             self._motion_commands += 1
+            if source == "onset":
+                self._onset_motion_actions += 1
+            else:
+                self._tempo_motion_actions += 1
 
-    async def _flash_led(self, cfg: BeatModeConfig, beat_period: float) -> None:
+    async def _flash_led(
+        self, cfg: BeatModeConfig, beat_period: float, *, source: str = "tempo"
+    ) -> None:
         color = cfg.color
         dim = tuple(int(channel * 0.12) for channel in color)
         flash_s = min(0.09, max(0.03, beat_period * 0.18))
         if await self._set_base_ring_color(color):
+            if source == "onset":
+                self._onset_led_actions += 1
+            else:
+                self._tempo_led_actions += 1
             await self._sleep_or_stop(flash_s)
             await self._set_base_ring_color(dim)
 
